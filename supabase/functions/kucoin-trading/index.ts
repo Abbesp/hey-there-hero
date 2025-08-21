@@ -4,6 +4,7 @@ import { createHmac } from "https://deno.land/std@0.190.0/crypto/mod.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS", // ✅ lagt till
 };
 
 // KuCoin API configuration
@@ -45,8 +46,12 @@ function createKuCoinHeaders(method: string, endpoint: string, body: string) {
 }
 
 serve(async (req) => {
+  // ✅ Ny korrekt OPTIONS-hantering
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response("ok", {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   try {
@@ -97,7 +102,7 @@ serve(async (req) => {
         message: "Order placed successfully",
         kucoinResponse: result
       }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, // ✅ lagt till CORS
         status: 200,
       });
     }
@@ -118,7 +123,7 @@ serve(async (req) => {
         success: true,
         data: result.data
       }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, // ✅ lagt till CORS
         status: 200,
       });
     }
@@ -133,7 +138,7 @@ serve(async (req) => {
       error: error.message,
       message: "Failed to process KuCoin request"
     }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" }, // ✅ lagt till CORS
       status: 500,
     });
   }
