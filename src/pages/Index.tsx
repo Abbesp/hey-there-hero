@@ -152,8 +152,8 @@ const Index = () => {
               </div>
               
               <ImageUpload
-                onImageUpload={handleImageUpload}
-                onImageRemove={handleRemoveImage}
+                onImageUploaded={handleImageUpload}
+                onRemoveImage={handleRemoveImage}
                 uploadedImage={uploadedImage}
               />
 
@@ -181,8 +181,8 @@ const Index = () => {
 
               {analysisResult && (
                 <AnalysisResults 
-                  result={analysisResult}
-                  onAddToJournal={createTradeFromAnalysis}
+                  data={analysisResult}
+                  imageUrl={uploadedImage}
                 />
               )}
             </Card>
@@ -223,8 +223,19 @@ const Index = () => {
             {/* Price Prediction & News */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <PricePrediction 
-                selectedCurrency={selectedCurrency}
-                predictionResult={predictionResult}
+                currency={selectedCurrency}
+                timeframe={selectedTimeframe}
+                data={predictionResult || {
+                  currentPrice: 45000,
+                  predictedPrice: 47000,
+                  priceChange: 2000,
+                  percentageChange: 4.4,
+                  direction: 'bullish',
+                  confidence: 75,
+                  timeToTarget: '24-48 hours',
+                  keyEvents: ['Technical breakout expected', 'Volume increasing'],
+                  volatility: 'medium'
+                }}
               />
               <CryptoNews selectedCurrency={selectedCurrency} />
             </div>
@@ -232,19 +243,20 @@ const Index = () => {
             {/* Advanced Analysis */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <SMCAnalysis 
-                selectedCurrency={selectedCurrency}
-                selectedTimeframe={selectedTimeframe}
+                currency={selectedCurrency}
+                timeframe={selectedTimeframe}
               />
               <ICTAnalysis 
-                selectedCurrency={selectedCurrency}
-                selectedTimeframe={selectedTimeframe}
+                currency={selectedCurrency}
+                timeframe={selectedTimeframe}
               />
             </div>
 
             {/* Auto Trading Signals */}
             <AutoTradingSignals 
               selectedCurrency={selectedCurrency}
-              selectedStrategy={selectedStrategy}
+              selectedTimeframe={selectedTimeframe}
+              tradingType={selectedTradingType}
             />
           </div>
         )}
