@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Brain, Zap, BarChart3, BookOpen, TrendingUp } from 'lucide-react';
+import { Brain, Zap, BarChart3, BookOpen, TrendingUp, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ImageUpload } from '@/components/ImageUpload';
@@ -115,41 +115,62 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
+    <div className="min-h-screen relative overflow-hidden">
+      {/* Background Effects */}
+      <div className="absolute inset-0 bg-gradient-background" />
+      <div className="absolute inset-0">
+        <div className="absolute top-20 left-20 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-float" />
+        <div className="absolute bottom-20 right-20 w-80 h-80 bg-accent/10 rounded-full blur-3xl animate-float" style={{animationDelay: '2s'}} />
+        <div className="absolute top-1/2 left-1/2 w-64 h-64 bg-secondary/10 rounded-full blur-3xl animate-float" style={{animationDelay: '4s'}} />
+      </div>
+      
+      <div className="relative container mx-auto px-4 py-12 max-w-7xl">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl md:text-6xl font-bold text-white mb-4">
-            Chart<span className="text-blue-500">Trader</span>
-          </h1>
-          <p className="text-xl text-gray-300 mb-8">
+        <div className="text-center mb-16 animate-fade-in">
+          <div className="inline-block mb-6">
+            <h1 className="text-5xl md:text-7xl font-luxury font-black tracking-tight mb-4">
+              Chart<span className="text-luxury">Trader</span>
+            </h1>
+            <div className="h-1 w-full bg-gradient-primary rounded-full shadow-glow" />
+          </div>
+          <p className="text-xl md:text-2xl text-foreground/80 mb-8 font-medium">
             Professional Trading Analysis & Strategy Platform
           </p>
+          <div className="inline-flex items-center gap-3 glass-card px-6 py-3 rounded-full">
+            <div className="w-2 h-2 bg-primary rounded-full animate-pulse-glow" />
+            <span className="text-sm font-medium text-primary">Live Market Analysis</span>
+          </div>
         </div>
 
         {/* Market & Strategy Selection */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <MarketSelector
-            selectedCurrency={selectedCurrency}
-            onCurrencyChange={setSelectedCurrency}
-            selectedTimeframe={selectedTimeframe}
-            onTimeframeChange={setSelectedTimeframe}
-            selectedTradingType={selectedTradingType}
-            onTradingTypeChange={setSelectedTradingType}
-          />
-          <StrategySelector
-            selectedStrategy={selectedStrategy}
-            onStrategyChange={setSelectedStrategy}
-          />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12 animate-slide-in">
+          <div className="glass-card p-8 rounded-2xl shadow-floating glow">
+            <MarketSelector
+              selectedCurrency={selectedCurrency}
+              onCurrencyChange={setSelectedCurrency}
+              selectedTimeframe={selectedTimeframe}
+              onTimeframeChange={setSelectedTimeframe}
+              selectedTradingType={selectedTradingType}
+              onTradingTypeChange={setSelectedTradingType}
+            />
+          </div>
+          <div className="glass-card p-8 rounded-2xl shadow-floating glow">
+            <StrategySelector
+              selectedStrategy={selectedStrategy}
+              onStrategyChange={setSelectedStrategy}
+            />
+          </div>
         </div>
 
         {/* Chart Upload & Analysis */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mb-12 animate-scale-in">
           <div className="xl:col-span-2">
-            <Card className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Brain className="h-5 w-5 text-blue-500" />
-                <h2 className="text-xl font-semibold text-white">Chart Analysis</h2>
+            <div className="glass-card p-8 rounded-2xl shadow-floating">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-gradient-primary rounded-lg shadow-luxury">
+                  <Brain className="h-6 w-6 text-primary-foreground" />
+                </div>
+                <h2 className="text-2xl font-bold text-luxury">AI Chart Analysis</h2>
               </div>
               
               <ImageUpload
@@ -159,21 +180,21 @@ const Index = () => {
               />
 
               {uploadedImage && (
-                <div className="mt-4">
+                <div className="mt-6">
                   <Button 
                     onClick={simulateAnalysis}
                     disabled={isAnalyzing}
-                    className="w-full"
+                    className="w-full btn-luxury h-14 text-lg font-semibold"
                   >
                     {isAnalyzing ? (
                       <>
-                        <Zap className="mr-2 h-4 w-4 animate-spin" />
+                        <Zap className="mr-3 h-5 w-5 animate-spin" />
                         Analyzing Chart...
                       </>
                     ) : (
                       <>
-                        <Brain className="mr-2 h-4 w-4" />
-                        Analyze Chart
+                        <Brain className="mr-3 h-5 w-5" />
+                        Analyze Chart with AI
                       </>
                     )}
                   </Button>
@@ -181,22 +202,26 @@ const Index = () => {
               )}
 
               {analysisResult && (
-                <AnalysisResults 
-                  data={analysisResult}
-                  imageUrl={uploadedImage}
-                />
+                <div className="mt-6">
+                  <AnalysisResults 
+                    data={analysisResult}
+                    imageUrl={uploadedImage}
+                  />
+                </div>
               )}
-            </Card>
+            </div>
           </div>
 
           <div className="space-y-6">
-            <TradingStats trades={trades} />
+            <div className="glass-card rounded-2xl shadow-floating">
+              <TradingStats trades={trades} />
+            </div>
             
-            <div className="flex gap-2">
+            <div className="flex gap-3">
               <Button
                 variant={showJournal ? "default" : "outline"}
                 onClick={() => setShowJournal(true)}
-                className="flex-1"
+                className={`flex-1 h-12 font-semibold ${showJournal ? 'btn-luxury' : 'glass-card border-primary/20 hover:border-primary/40'}`}
               >
                 <BookOpen className="mr-2 h-4 w-4" />
                 Journal
@@ -204,7 +229,7 @@ const Index = () => {
               <Button
                 variant={!showJournal ? "default" : "outline"}
                 onClick={() => setShowJournal(false)}
-                className="flex-1"
+                className={`flex-1 h-12 font-semibold ${!showJournal ? 'btn-luxury' : 'glass-card border-primary/20 hover:border-primary/40'}`}
               >
                 <BarChart3 className="mr-2 h-4 w-4" />
                 Analysis
@@ -215,57 +240,76 @@ const Index = () => {
 
         {/* Conditional Content */}
         {showJournal ? (
-          <TradeJournal 
-            trades={trades}
-            onUpdateTrade={handleUpdateTrade}
-          />
+          <div className="glass-card rounded-2xl shadow-floating p-1">
+            <TradeJournal 
+              trades={trades}
+              onUpdateTrade={handleUpdateTrade}
+            />
+          </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-12">
             {/* Price Prediction & News */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <PricePrediction 
-                currency={selectedCurrency}
-                timeframe={selectedTimeframe}
-                data={predictionResult || {
-                  currentPrice: 45000,
-                  predictedPrice: 47000,
-                  priceChange: 2000,
-                  percentageChange: 4.4,
-                  direction: 'bullish',
-                  confidence: 75,
-                  timeToTarget: '24-48 hours',
-                  keyEvents: ['Technical breakout expected', 'Volume increasing'],
-                  volatility: 'medium'
-                }}
-              />
-              <CryptoNews selectedCurrency={selectedCurrency} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="glass-card rounded-2xl shadow-floating p-1">
+                <PricePrediction 
+                  currency={selectedCurrency}
+                  timeframe={selectedTimeframe}
+                  data={predictionResult || {
+                    currentPrice: 45000,
+                    predictedPrice: 47000,
+                    priceChange: 2000,
+                    percentageChange: 4.4,
+                    direction: 'bullish',
+                    confidence: 75,
+                    timeToTarget: '24-48 hours',
+                    keyEvents: ['Technical breakout expected', 'Volume increasing'],
+                    volatility: 'medium'
+                  }}
+                />
+              </div>
+              <div className="glass-card rounded-2xl shadow-floating p-1">
+                <CryptoNews selectedCurrency={selectedCurrency} />
+              </div>
             </div>
 
             {/* Advanced Analysis */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <SMCAnalysis 
-                currency={selectedCurrency}
-                timeframe={selectedTimeframe}
-              />
-              <ICTAnalysis 
-                currency={selectedCurrency}
-                timeframe={selectedTimeframe}
-              />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="glass-card rounded-2xl shadow-floating p-1">
+                <SMCAnalysis 
+                  currency={selectedCurrency}
+                  timeframe={selectedTimeframe}
+                />
+              </div>
+              <div className="glass-card rounded-2xl shadow-floating p-1">
+                <ICTAnalysis 
+                  currency={selectedCurrency}
+                  timeframe={selectedTimeframe}
+                />
+              </div>
             </div>
 
             {/* Auto Trading Signals */}
-            <AutoTradingSignals 
-              selectedCurrency={selectedCurrency}
-              selectedTimeframe={selectedTimeframe}
-              tradingType={selectedTradingType}
-            />
+            <div className="glass-card rounded-2xl shadow-floating p-1">
+              <AutoTradingSignals 
+                selectedCurrency={selectedCurrency}
+                selectedTimeframe={selectedTimeframe}
+                tradingType={selectedTradingType}
+              />
+            </div>
 
             {/* AI Auto Trading Bot */}
-            <div className="mt-6">
-              <h2 className="text-2xl font-bold text-white mb-4">AI Auto Trading Bot</h2>
-              <p className="text-gray-300 mb-6">
-                Automatisk trading bot som analyserar marknaden och utför max 5 trades/dag med 4% risk per trade
-              </p>
+            <div className="glass-card rounded-2xl shadow-floating p-8">
+              <div className="text-center mb-8">
+                <div className="inline-flex items-center gap-3 mb-4">
+                  <div className="p-3 bg-gradient-primary rounded-xl shadow-luxury">
+                    <Bot className="h-8 w-8 text-primary-foreground" />
+                  </div>
+                  <h2 className="text-3xl font-bold text-luxury">AI Auto Trading Bot</h2>
+                </div>
+                <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+                  Automatisk trading bot som analyserar marknaden och utför max 5 trades/dag med 4% risk per trade
+                </p>
+              </div>
               <AutoTrader />
             </div>
           </div>
