@@ -14,6 +14,7 @@ import { SMCAnalysis } from '@/components/SMCAnalysis';
 import { ICTAnalysis } from '@/components/ICTAnalysis';
 
 import { AutoTradingSignals } from '@/components/AutoTradingSignals';
+import { AutoTrader } from '@/components/AutoTrader';
 import { toast } from 'sonner';
 
 const Index = () => {
@@ -258,6 +259,15 @@ const Index = () => {
               selectedTimeframe={selectedTimeframe}
               tradingType={selectedTradingType}
             />
+
+            {/* AI Auto Trading Bot */}
+            <div className="mt-6">
+              <h2 className="text-2xl font-bold text-white mb-4">AI Auto Trading Bot</h2>
+              <p className="text-gray-300 mb-6">
+                Automatisk trading bot som analyserar marknaden och utför max 5 trades/dag med 4% risk per trade
+              </p>
+              <AutoTrader />
+            </div>
           </div>
         )}
       </div>
