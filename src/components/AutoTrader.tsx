@@ -97,13 +97,49 @@ export const AutoTrader = () => {
     return selectedStrategy === 'scalp' ? ['1m', '5m', '15m'] : ['1h', '4h', '1d'];
   };
 
+  // Test Edge Function connection
+  const testConnection = async () => {
+    try {
+      console.log('🧪 Testing Edge Function connection...');
+      const { data, error } = await supabase.functions.invoke('kucoin-trading', {
+        body: { action: 'get_market_data' }
+      });
+
+      if (error) {
+        console.error('Connection test failed:', error);
+        toast.error(`Edge Function fel: ${error.message}`);
+        return false;
+      }
+
+      if (data?.success) {
+        toast.success('✅ Edge Function anslutning fungerar!');
+        return true;
+      } else {
+        toast.error('Edge Function svarar men returnerar fel');
+        return false;
+      }
+    } catch (err: any) {
+      console.error('Connection test error:', err);
+      toast.error(`Anslutningstest misslyckades: ${err.message}`);
+      return false;
+    }
+  };
+
   // Get real KuCoin market data and generate opportunities
   const generateTradeOpportunities = async () => {
     setIsAnalyzing(true);
     console.log('🚀 Starting trade analysis...');
 
     try {
-      // First try KuCoin API
+      // First test the connection
+      const connectionWorking = await testConnection();
+      if (!connectionWorking) {
+        setIsAnalyzing(false);
+        toast.error('❌ Kan inte ansluta till Edge Function. Kontrollera Supabase deployment.');
+        return;
+      }
+
+      // Try KuCoin API
       console.log('📡 Calling KuCoin API...');
       const { data: marketData, error } = await supabase.functions.invoke('kucoin-trading', {
         body: { action: 'get_market_data' }
@@ -111,24 +147,15 @@ export const AutoTrader = () => {
 
       console.log('📊 KuCoin response:', { marketData, error });
 
-      let symbols, prices;
-
-      if (error || !marketData?.symbols) {
-        // Fallback to demo data when API fails or rate limited
-        console.log('⚠️ Using demo data (API not available)');
-        symbols = ['BTC-USDT', 'ETH-USDT', 'ADA-USDT', 'SOL-USDT', 'MATIC-USDT'];
-        prices = {
-          'BTC-USDT': 43250 + (Math.random() - 0.5) * 1000,
-          'ETH-USDT': 2890 + (Math.random() - 0.5) * 200,
-          'ADA-USDT': 0.45 + (Math.random() - 0.5) * 0.1,
-          'SOL-USDT': 98 + (Math.random() - 0.5) * 20,
-          'MATIC-USDT': 0.85 + (Math.random() - 0.5) * 0.2
-        };
-        toast.info('📊 Använder demo-data (API rate limit)');
-      } else {
-        symbols = marketData.symbols;
-        prices = marketData.prices;
+      if (error) {
+        throw new Error(`Edge Function error: ${error.message}`);
       }
+
+      if (!marketData?.success) {
+        throw new Error('Edge Function returnerade fel status');
+      }
+
+      const { symbols, prices } = marketData;
       const opportunities: TradeOpportunity[] = [];
       const timeframes = getTimeframes();
 
@@ -226,7 +253,12 @@ export const AutoTrader = () => {
         });
 
         if (error) {
-          throw new Error(`Edge Function error: ${error.message}`);
+          console.error('Edge Function error:', error);
+          throw new Error(`Edge Function error: ${error.message || 'Unknown error'}`);
+        }
+
+        if (!data) {
+          throw new Error('Inget svar från Edge Function');
         }
 
         if (data?.success && data?.orderId) {
@@ -385,6 +417,14 @@ export const AutoTrader = () => {
               disabled={isAnalyzing || manualCapital <= 0}
             >
               {isAnalyzing ? "Analyserar..." : `Sök ${selectedStrategy.toUpperCase()} Trades`}
+            </Button>
+            <Button
+              onClick={testConnection}
+              variant="ghost"
+              size="sm"
+              className="text-xs"
+            >
+              Test Anslutning
             </Button>
           </div>
 
