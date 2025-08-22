@@ -1,1 +1,4 @@
 project_id = "jhyyinuiaxtgdqukzuqz"
+
+[functions.kucoin-trading]
+verify_jwt = false
