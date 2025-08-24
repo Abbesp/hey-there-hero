@@ -1,6 +1,5 @@
 // supabase/functions/kucoin-trading/index.ts
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createHmac } from "https://deno.land/std@0.224.0/crypto/mod.ts";
 
 const KUCOIN_BASE_URL = "https://api.kucoin.com";
 
@@ -20,21 +19,32 @@ function json(body: unknown, status = 200) {
 function b64(bytes: Uint8Array) {
   return btoa(String.fromCharCode(...bytes));
 }
-function hmacBase64(message: string, secret: string) {
+
+// Ersätter gamla createHmac-versionen, men behåller namnet
+async function hmacBase64(message: string, secret: string) {
   const enc = new TextEncoder();
-  const hmac = createHmac("sha256", enc.encode(secret));
-  hmac.update(enc.encode(message));
-  return b64(hmac.digest());
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return b64(new Uint8Array(sig));
 }
-function createSignature(ts: string, method: string, path: string, body: string, secret: string) {
+
+async function createSignature(ts: string, method: string, path: string, body: string, secret: string) {
   const toSign = ts + method.toUpperCase() + path + body;
-  return hmacBase64(toSign, secret);
+  return await hmacBase64(toSign, secret);
 }
+
 // Per KuCoin KEY-VERSION 2
-function createPassphrase(passphrase: string, secret: string) {
-  return hmacBase64(passphrase, secret);
+async function createPassphrase(passphrase: string, secret: string) {
+  return await hmacBase64(passphrase, secret);
 }
-function kucoinHeaders(method: string, endpoint: string, body: string) {
+
+async function kucoinHeaders(method: string, endpoint: string, body: string) {
   const apiKey = Deno.env.get("KUCOIN_API_KEY");
   const apiSecret = Deno.env.get("KUCOIN_API_SECRET");
   const passphrase = Deno.env.get("KUCOIN_API_PASSPHRASE");
@@ -44,9 +54,9 @@ function kucoinHeaders(method: string, endpoint: string, body: string) {
   const ts = Date.now().toString();
   return {
     "KC-API-KEY": apiKey,
-    "KC-API-SIGN": createSignature(ts, method, endpoint, body, apiSecret),
+    "KC-API-SIGN": await createSignature(ts, method, endpoint, body, apiSecret),
     "KC-API-TIMESTAMP": ts,
-    "KC-API-PASSPHRASE": createPassphrase(passphrase, apiSecret),
+    "KC-API-PASSPHRASE": await createPassphrase(passphrase, apiSecret),
     "KC-API-KEY-VERSION": "2",
     "Content-Type": "application/json",
   };
@@ -101,7 +111,7 @@ serve(async (req) => {
       }
 
       const bodyStr = JSON.stringify(payload);
-      const headers = kucoinHeaders("POST", endpoint, bodyStr);
+      const headers = await kucoinHeaders("POST", endpoint, bodyStr);
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
       const out = await r.json();
       if (!r.ok) throw new Error(out?.msg || "KuCoin order error");
