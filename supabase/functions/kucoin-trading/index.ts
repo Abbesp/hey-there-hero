@@ -20,7 +20,7 @@ function b64(bytes: Uint8Array) {
   return btoa(String.fromCharCode(...bytes));
 }
 
-// Ersätter gamla createHmac-versionen, men behåller namnet
+// === HMAC via Web Crypto API ===
 async function hmacBase64(message: string, secret: string) {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -76,7 +76,10 @@ serve(async (req) => {
     if (action === "get_market_data") {
       const r = await fetch(`${KUCOIN_BASE_URL}/api/v1/market/allTickers`);
       const out = await r.json();
-      if (!r.ok) throw new Error(out?.msg || "KuCoin market data error");
+      if (!r.ok) {
+        console.error("KuCoin market error:", out);
+        return json({ success: false, error: out?.msg || "KuCoin market data error", details: out }, r.status);
+      }
 
       const wanted = new Set(["BTC-USDT", "ETH-USDT", "ADA-USDT", "SOL-USDT", "MATIC-USDT"]);
       const prices: Record<string, number> = {};
@@ -92,7 +95,6 @@ serve(async (req) => {
     }
 
     if (action === "place_order") {
-      // förväntar: symbol, side ('buy'/'sell'), size (antal), type ('market'|'limit'), price? (vid limit)
       const { symbol, side, size, type = "market", price } = body ?? {};
       if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" }, 400);
 
@@ -100,7 +102,7 @@ serve(async (req) => {
       const payload: Record<string, unknown> = {
         clientOid: crypto.randomUUID(),
         symbol,
-        side: String(side).toLowerCase(), // buy/sell
+        side: String(side).toLowerCase(),
         type,
       };
       if (type === "market") payload.size = String(size);
@@ -114,7 +116,10 @@ serve(async (req) => {
       const headers = await kucoinHeaders("POST", endpoint, bodyStr);
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
       const out = await r.json();
-      if (!r.ok) throw new Error(out?.msg || "KuCoin order error");
+      if (!r.ok) {
+        console.error("KuCoin order error:", out);
+        return json({ success: false, error: out?.msg || "KuCoin order error", details: out }, r.status);
+      }
 
       return json({ success: true, orderId: out?.data?.orderId ?? out?.orderId ?? null });
     }
