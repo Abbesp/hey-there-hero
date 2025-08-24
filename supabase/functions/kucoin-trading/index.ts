@@ -95,34 +95,45 @@ serve(async (req) => {
     }
 
     if (action === "place_order") {
-      const { symbol, side, size, type = "market", price } = body ?? {};
-      if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" }, 400);
+  const { symbol, side, size, type = "market", price } = body ?? {};
+  if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" }, 400);
 
-      const endpoint = "/api/v1/orders";
-      const payload: Record<string, unknown> = {
-        clientOid: crypto.randomUUID(),
-        symbol,
-        side: String(side).toLowerCase(),
-        type,
-      };
-      if (type === "market") payload.size = String(size);
-      if (type === "limit") {
-        payload.price = String(price);
-        payload.size = String(size);
-        payload.timeInForce = "GTC";
-      }
+  const endpoint = "/api/v1/orders";
+  const payload: Record<string, unknown> = {
+    clientOid: crypto.randomUUID(),
+    symbol,
+    side: String(side).toLowerCase(), // buy/sell
+    type,
+  };
 
-      const bodyStr = JSON.stringify(payload);
-      const headers = await kucoinHeaders("POST", endpoint, bodyStr);
-      const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
-      const out = await r.json();
-      if (!r.ok) {
-        console.error("KuCoin order error:", out);
-        return json({ success: false, error: out?.msg || "KuCoin order error", details: out }, r.status);
-      }
-
-      return json({ success: true, orderId: out?.data?.orderId ?? out?.orderId ?? null });
+  if (type === "market") {
+    if (payload.side === "buy") {
+      // KuCoin vill ha funds (USDT-belopp)
+      payload.funds = String(size);
+    } else {
+      // sell använder size
+      payload.size = String(size);
     }
+  }
+
+  if (type === "limit") {
+    payload.price = String(price);
+    payload.size = String(size);
+    payload.timeInForce = "GTC";
+  }
+
+  const bodyStr = JSON.stringify(payload);
+  const headers = await kucoinHeaders("POST", endpoint, bodyStr);
+  const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
+  const out = await r.json();
+  if (!r.ok) {
+    console.error("KuCoin order error:", out);
+    return json({ success: false, error: out?.msg || "KuCoin order error", details: out }, r.status);
+  }
+
+  return json({ success: true, orderId: out?.data?.orderId ?? out?.orderId ?? null });
+}
+
 
     return json({ success: false, error: "Unknown action" }, 400);
   } catch (err: any) {
