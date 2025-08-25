@@ -49,7 +49,7 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
     throw new Error("Missing KuCoin API credentials");
   }
   const ts = Date.now().toString();
-  return {
+  const headers = {
     "KC-API-KEY": apiKey,
     "KC-API-SIGN": await createSignature(ts, method, endpoint, body, apiSecret),
     "KC-API-TIMESTAMP": ts,
@@ -57,6 +57,13 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
     "KC-API-KEY-VERSION": "2",
     "Content-Type": "application/json",
   };
+
+  // Logga headers utan känsliga fält
+  const safeHeaders = { ...headers };
+  delete safeHeaders["KC-API-SIGN"];
+  console.log("KuCoin headers (safe):", safeHeaders);
+
+  return headers;
 }
 
 serve(async (req) => {
@@ -120,16 +127,24 @@ serve(async (req) => {
       const bodyStr = JSON.stringify(payload);
       const headers = await kucoinHeaders("POST", endpoint, bodyStr);
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
-      const out = await r.json();
+
+      let out: any;
+      try {
+        out = await r.json();
+      } catch (e) {
+        console.error("KuCoin order non-JSON response:", await r.text());
+        return json({ success: false, error: "KuCoin order non-JSON response" });
+      }
 
       // kontrollera både HTTP och KuCoin-code
       if (!r.ok || !out || out.code !== "200000") {
-        console.error("KuCoin order error:", out);
+        console.error("KuCoin order error:", { status: r.status, out, payload });
         return json({
           success: false,
           error: out?.msg || "KuCoin order error",
           details: out,
-          request: payload, // skicka tillbaka ordern vi försökte lägga
+          request: payload,
+          status: r.status,
         });
       }
 
