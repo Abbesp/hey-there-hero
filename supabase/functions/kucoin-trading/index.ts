@@ -10,7 +10,7 @@ const corsHeaders = {
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), {
-    status: 200, // alltid 200!
+    status: 200, // alltid 200
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
@@ -105,9 +105,9 @@ serve(async (req) => {
 
       if (type === "market") {
         if (payload.side === "buy") {
-          payload.funds = String(size);
+          payload.funds = String(size); // USDT-belopp att spendera
         } else {
-          payload.size = String(size);
+          payload.size = String(size); // antal coins att sälja
         }
       }
 
@@ -121,12 +121,23 @@ serve(async (req) => {
       const headers = await kucoinHeaders("POST", endpoint, bodyStr);
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
       const out = await r.json();
-      if (!r.ok) {
+
+      // kontrollera både HTTP och KuCoin-code
+      if (!r.ok || !out || out.code !== "200000") {
         console.error("KuCoin order error:", out);
-        return json({ success: false, error: out?.msg || "KuCoin order error", details: out });
+        return json({
+          success: false,
+          error: out?.msg || "KuCoin order error",
+          details: out,
+          request: payload, // skicka tillbaka ordern vi försökte lägga
+        });
       }
 
-      return json({ success: true, orderId: out?.data?.orderId ?? out?.orderId ?? null });
+      return json({
+        success: true,
+        orderId: out.data?.orderId ?? null,
+        raw: out,
+      });
     }
 
     return json({ success: false, error: "Unknown action" });
@@ -135,4 +146,3 @@ serve(async (req) => {
     return json({ success: false, error: String(err?.message || err) });
   }
 });
-
