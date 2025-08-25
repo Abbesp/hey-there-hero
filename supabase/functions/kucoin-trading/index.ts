@@ -1,4 +1,3 @@
-// supabase/functions/kucoin-trading/index.ts
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 const KUCOIN_BASE_URL = "https://api.kucoin.com";
@@ -9,9 +8,9 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-function json(body: unknown, status = 200) {
+function json(body: unknown) {
   return new Response(JSON.stringify(body), {
-    status,
+    status: 200, // alltid 200!
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
@@ -20,7 +19,6 @@ function b64(bytes: Uint8Array) {
   return btoa(String.fromCharCode(...bytes));
 }
 
-// === HMAC via Web Crypto API ===
 async function hmacBase64(message: string, secret: string) {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -39,7 +37,6 @@ async function createSignature(ts: string, method: string, path: string, body: s
   return await hmacBase64(toSign, secret);
 }
 
-// Per KuCoin KEY-VERSION 2
 async function createPassphrase(passphrase: string, secret: string) {
   return await hmacBase64(passphrase, secret);
 }
@@ -78,7 +75,7 @@ serve(async (req) => {
       const out = await r.json();
       if (!r.ok) {
         console.error("KuCoin market error:", out);
-        return json({ success: false, error: out?.msg || "KuCoin market data error", details: out }, r.status);
+        return json({ success: false, error: out?.msg || "KuCoin market data error", details: out });
       }
 
       const wanted = new Set(["BTC-USDT", "ETH-USDT", "ADA-USDT", "SOL-USDT", "MATIC-USDT"]);
@@ -95,49 +92,47 @@ serve(async (req) => {
     }
 
     if (action === "place_order") {
-  const { symbol, side, size, type = "market", price } = body ?? {};
-  if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" }, 400);
+      const { symbol, side, size, type = "market", price } = body ?? {};
+      if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" });
 
-  const endpoint = "/api/v1/orders";
-  const payload: Record<string, unknown> = {
-    clientOid: crypto.randomUUID(),
-    symbol,
-    side: String(side).toLowerCase(), // buy/sell
-    type,
-  };
+      const endpoint = "/api/v1/orders";
+      const payload: Record<string, unknown> = {
+        clientOid: crypto.randomUUID(),
+        symbol,
+        side: String(side).toLowerCase(),
+        type,
+      };
 
-  if (type === "market") {
-    if (payload.side === "buy") {
-      // KuCoin vill ha funds (USDT-belopp)
-      payload.funds = String(size);
-    } else {
-      // sell använder size
-      payload.size = String(size);
+      if (type === "market") {
+        if (payload.side === "buy") {
+          payload.funds = String(size);
+        } else {
+          payload.size = String(size);
+        }
+      }
+
+      if (type === "limit") {
+        payload.price = String(price);
+        payload.size = String(size);
+        payload.timeInForce = "GTC";
+      }
+
+      const bodyStr = JSON.stringify(payload);
+      const headers = await kucoinHeaders("POST", endpoint, bodyStr);
+      const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
+      const out = await r.json();
+      if (!r.ok) {
+        console.error("KuCoin order error:", out);
+        return json({ success: false, error: out?.msg || "KuCoin order error", details: out });
+      }
+
+      return json({ success: true, orderId: out?.data?.orderId ?? out?.orderId ?? null });
     }
-  }
 
-  if (type === "limit") {
-    payload.price = String(price);
-    payload.size = String(size);
-    payload.timeInForce = "GTC";
-  }
-
-  const bodyStr = JSON.stringify(payload);
-  const headers = await kucoinHeaders("POST", endpoint, bodyStr);
-  const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
-  const out = await r.json();
-  if (!r.ok) {
-    console.error("KuCoin order error:", out);
-    return json({ success: false, error: out?.msg || "KuCoin order error", details: out }, r.status);
-  }
-
-  return json({ success: true, orderId: out?.data?.orderId ?? out?.orderId ?? null });
-}
-
-
-    return json({ success: false, error: "Unknown action" }, 400);
+    return json({ success: false, error: "Unknown action" });
   } catch (err: any) {
     console.error("Error in kucoin-trading:", err);
-    return json({ success: false, error: String(err?.message || err) }, 500);
+    return json({ success: false, error: String(err?.message || err) });
   }
 });
+
