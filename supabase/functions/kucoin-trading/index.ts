@@ -45,20 +45,28 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
   const apiKey = Deno.env.get("KUCOIN_API_KEY");
   const apiSecret = Deno.env.get("KUCOIN_API_SECRET");
   const passphrase = Deno.env.get("KUCOIN_API_PASSPHRASE");
+  const apiVersion = Deno.env.get("KUCOIN_API_VERSION") || "2"; // default 2
+
   if (!apiKey || !apiSecret || !passphrase) {
     throw new Error("Missing KuCoin API credentials");
   }
+
   const ts = Date.now().toString();
-  const headers = {
+  const headers: Record<string, string> = {
     "KC-API-KEY": apiKey,
     "KC-API-SIGN": await createSignature(ts, method, endpoint, body, apiSecret),
     "KC-API-TIMESTAMP": ts,
-    "KC-API-PASSPHRASE": await createPassphrase(passphrase, apiSecret),
-    "KC-API-KEY-VERSION": "2",
+    "KC-API-KEY-VERSION": apiVersion,
     "Content-Type": "application/json",
   };
 
-  // Logga headers utan känsliga fält
+  if (apiVersion === "2") {
+    headers["KC-API-PASSPHRASE"] = await createPassphrase(passphrase, apiSecret);
+  } else {
+    headers["KC-API-PASSPHRASE"] = passphrase; // v1: raw passphrase
+  }
+
+  // log safe headers
   const safeHeaders = { ...headers };
   delete safeHeaders["KC-API-SIGN"];
   console.log("KuCoin headers (safe):", safeHeaders);
