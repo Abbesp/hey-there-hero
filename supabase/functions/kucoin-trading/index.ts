@@ -468,97 +468,43 @@ serve(async (req) => {
         });
       }
 
-      // Check for KuCoin API success codes
-      // KuCoin v1 API returns code "200000" for success, v2 might be different
-      if (out.code && out.code !== "200000") {
-        console.error("KuCoin order API error:", { out, payload, headers });
-        
-        // Handle specific KuCoin error codes
-        let errorMessage = "KuCoin order API error";
-        switch (out.code) {
-          case "400001":
-            errorMessage = "Order failed - insufficient funds";
-            break;
-          case "400002":
-            errorMessage = "Order failed - invalid symbol";
-            break;
-          case "400003":
-            errorMessage = "Order failed - invalid order type";
-            break;
-          case "400004":
-            errorMessage = "Order failed - invalid price";
-            break;
-          case "400005":
-            errorMessage = "Order failed - invalid size";
-            break;
-          case "400006":
-            errorMessage = "Order failed - trading pair not available";
-            break;
-          case "400007":
-            errorMessage = "Order failed - account not found";
-            break;
-          case "400008":
-            errorMessage = "Order failed - order already exists";
-            break;
-          case "400009":
-            errorMessage = "Order failed - rate limit exceeded";
-            break;
-          default:
-            errorMessage = out?.msg || out?.message || `KuCoin API error: ${out.code}`;
+      // Check if this is a successful response from KuCoin
+      // KuCoin returns code "200000" for success
+      if (out.code === "200000") {
+        // Success! Check if we have order data
+        if (!out.data || !out.data.orderId) {
+          console.error("KuCoin order missing data:", { out, payload });
+          return json({
+            success: false,
+            error: "KuCoin order response missing order data",
+            details: out,
+            request: payload,
+          });
         }
-        
+
+        console.log("Order placed successfully:", { orderId: out.data.orderId, symbol, side, size });
         return json({
-          success: false,
-          error: errorMessage,
-          code: out?.code,
-          details: out,
-          request: payload,
+          success: true,
+          orderId: out.data.orderId,
+          raw: out,
         });
       }
 
-      // Check if response has the expected success structure
-      if (!out.code || out.code !== "200000") {
-        console.error("KuCoin order response missing success code:", { out, payload });
-        
-        // Try to extract any error message from the response
-        let errorMessage = "Order failed - no success response";
-        if (out?.msg) errorMessage = out.msg;
-        else if (out?.message) errorMessage = out.message;
-        
-        return json({
-          success: false,
-          error: errorMessage,
-          code: out?.code,
-          details: out,
-          request: payload,
-          responseStructure: {
-            hasCode: !!out?.code,
-            hasData: !!out?.data,
-            hasMsg: !!out?.msg,
-            hasMessage: !!out?.message,
-            responseKeys: Object.keys(out || {}),
-            dataKeys: out?.data ? Object.keys(out.data) : []
-          }
-        });
-      }
-
-      // Additional validation for successful response
-      if (!out.data || !out.data.orderId) {
-        console.error("KuCoin order missing data:", { out, payload });
-        return json({
-          success: false,
-          error: "KuCoin order response missing order data",
-          details: out,
-          request: payload,
-        });
-      }
-
-      console.log("Order placed successfully:", { orderId: out.data.orderId, symbol, side, size });
-
+      // If we get here, it's an error response
+      console.error("KuCoin order API error:", { out, payload, headers });
+      
+      // Extract error message
+      let errorMessage = "KuCoin order failed";
+      if (out.msg) errorMessage = out.msg;
+      else if (out.message) errorMessage = out.message;
+      else if (out.code) errorMessage = `KuCoin error: ${out.code}`;
+      
       return json({
-        success: true,
-        orderId: out.data.orderId,
-        raw: out,
+        success: false,
+        error: errorMessage,
+        code: out.code,
+        details: out,
+        request: payload,
       });
     }
 
