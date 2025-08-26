@@ -1,6 +1,38 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
+// Type declarations for Deno environment
+declare global {
+  const Deno: {
+    env: {
+      get(key: string): string | undefined;
+    };
+  };
+}
+
 const KUCOIN_BASE_URL = "https://api.kucoin.com";
+
+// Type interfaces for KuCoin API responses
+interface KuCoinResponse<T = any> {
+  code: string;
+  data: T;
+  msg?: string;
+  message?: string;
+}
+
+interface KuCoinOrderData {
+  orderId: string;
+  [key: string]: any;
+}
+
+interface KuCoinTicker {
+  symbol: string;
+  last: string;
+  [key: string]: any;
+}
+
+interface KuCoinMarketData {
+  ticker: KuCoinTicker[];
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -89,7 +121,7 @@ serve(async (req) => {
 
     if (action === "get_market_data") {
       const r = await fetch(`${KUCOIN_BASE_URL}/api/v1/market/allTickers`);
-      const out = await r.json();
+      const out: KuCoinResponse<KuCoinMarketData> = await r.json();
       if (!r.ok) {
         console.error("KuCoin market error:", out);
         return json({ success: false, error: out?.msg || "KuCoin market data error", details: out });
@@ -108,9 +140,86 @@ serve(async (req) => {
       return json({ success: true, symbols, prices });
     }
 
+    if (action === "test_kucoin_connection") {
+      try {
+        // Test basic connectivity
+        const r = await fetch(`${KUCOIN_BASE_URL}/api/v1/status`);
+        const status: KuCoinResponse = await r.json();
+        
+        // Test authenticated endpoint
+        const headers = await kucoinHeaders("GET", "/api/v1/accounts", "");
+        const accountsR = await fetch(`${KUCOIN_BASE_URL}/api/v1/accounts`, { headers });
+        const accounts: KuCoinResponse = await accountsR.json();
+        
+        return json({
+          success: true,
+          status: status,
+          accounts: accounts,
+          apiVersion: Deno.env.get("KUCOIN_API_VERSION") || "2"
+        });
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error("KuCoin connection test error:", err);
+        return json({
+          success: false,
+          error: errorMessage,
+          details: err
+        });
+      }
+    }
+
     if (action === "place_order") {
       const { symbol, side, size, type = "market", price } = body ?? {};
-      if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" });
+      
+      // Enhanced validation
+      if (!symbol || !side || !size) {
+        return json({ 
+          success: false, 
+          error: "Missing order params", 
+          required: ["symbol", "side", "size"],
+          received: { symbol, side, size, type, price }
+        });
+      }
+
+      // Validate symbol format
+      if (typeof symbol !== "string" || !symbol.includes("-")) {
+        return json({ 
+          success: false, 
+          error: "Invalid symbol format. Expected format: BASE-QUOTE (e.g., BTC-USDT)" 
+        });
+      }
+
+      // Validate side
+      if (!["buy", "sell"].includes(String(side).toLowerCase())) {
+        return json({ 
+          success: false, 
+          error: "Invalid side. Must be 'buy' or 'sell'" 
+        });
+      }
+
+      // Validate size
+      if (isNaN(Number(size)) || Number(size) <= 0) {
+        return json({ 
+          success: false, 
+          error: "Invalid size. Must be a positive number" 
+        });
+      }
+
+      // Validate type
+      if (!["market", "limit"].includes(type)) {
+        return json({ 
+          success: false, 
+          error: "Invalid order type. Must be 'market' or 'limit'" 
+        });
+      }
+
+      // Validate price for limit orders
+      if (type === "limit" && (!price || isNaN(Number(price)) || Number(price) <= 0)) {
+        return json({ 
+          success: false, 
+          error: "Invalid price for limit order. Must be a positive number" 
+        });
+      }
 
       const endpoint = "/api/v1/orders";
       const payload: Record<string, unknown> = {
@@ -136,37 +245,140 @@ serve(async (req) => {
 
       const bodyStr = JSON.stringify(payload);
       const headers = await kucoinHeaders("POST", endpoint, bodyStr);
+      
+      console.log(`Placing ${type} order:`, { symbol, side, size, price, payload });
+      
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
 
-      let out: any;
+      let out: KuCoinResponse<KuCoinOrderData>;
       try {
         out = await r.json();
       } catch (e) {
-        console.error("KuCoin order non-JSON response:", await r.text());
-        return json({ success: false, error: "KuCoin order non-JSON response" });
+        const responseText = await r.text();
+        console.error("KuCoin order non-JSON response:", responseText);
+        return json({ 
+          success: false, 
+          error: "KuCoin order non-JSON response", 
+          responseText,
+          status: r.status 
+        });
       }
 
-      if (!r.ok || !out || out.code !== "200000") {
-        console.error("KuCoin order error:", { status: r.status, out, payload, headers });
+      console.log("KuCoin order response:", { status: r.status, out });
+
+      // Check for HTTP success first
+      if (!r.ok) {
+        console.error("KuCoin order HTTP error:", { status: r.status, out, payload });
         return json({
           success: false,
-          error: out?.msg || "KuCoin order error",
+          error: `KuCoin HTTP error: ${r.status}`,
           details: out,
           request: payload,
           status: r.status,
         });
       }
 
+      // Check for KuCoin API success codes
+      // KuCoin v1 API returns code "200000" for success, v2 might be different
+      if (!out || (out.code && out.code !== "200000")) {
+        console.error("KuCoin order API error:", { out, payload, headers });
+        
+        // Handle specific KuCoin error codes
+        let errorMessage = "KuCoin order API error";
+        if (out?.code) {
+          switch (out.code) {
+            case "400001":
+              errorMessage = "Order failed - insufficient funds";
+              break;
+            case "400002":
+              errorMessage = "Order failed - invalid symbol";
+              break;
+            case "400003":
+              errorMessage = "Order failed - invalid order type";
+              break;
+            case "400004":
+              errorMessage = "Order failed - invalid price";
+              break;
+            case "400005":
+              errorMessage = "Order failed - invalid size";
+              break;
+            case "400006":
+              errorMessage = "Order failed - trading pair not available";
+              break;
+            case "400007":
+              errorMessage = "Order failed - account not found";
+              break;
+            case "400008":
+              errorMessage = "Order failed - order already exists";
+              break;
+            case "400009":
+              errorMessage = "Order failed - rate limit exceeded";
+              break;
+            default:
+              errorMessage = out?.msg || out?.message || `KuCoin API error: ${out.code}`;
+          }
+        }
+        
+        return json({
+          success: false,
+          error: errorMessage,
+          code: out?.code,
+          details: out,
+          request: payload,
+        });
+      }
+
+      // Additional validation for successful response
+      if (!out.data || !out.data.orderId) {
+        console.error("KuCoin order missing data:", { out, payload });
+        return json({
+          success: false,
+          error: "KuCoin order response missing order data",
+          details: out,
+          request: payload,
+        });
+      }
+
+      console.log("Order placed successfully:", { orderId: out.data.orderId, symbol, side, size });
+
       return json({
         success: true,
-        orderId: out.data?.orderId ?? null,
+        orderId: out.data.orderId,
+        raw: out,
+      });
+    }
+
+    if (action === "get_order_status") {
+      const { orderId } = body ?? {};
+      if (!orderId) return json({ success: false, error: "Missing orderId" });
+
+      const endpoint = `/api/v1/orders/${orderId}`;
+      const headers = await kucoinHeaders("GET", endpoint, "");
+      
+      const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { headers });
+      const out: KuCoinResponse<KuCoinOrderData> = await r.json();
+      
+      if (!r.ok || !out || out.code !== "200000") {
+        console.error("KuCoin get order error:", { status: r.status, out, orderId });
+        return json({
+          success: false,
+          error: out?.msg || "KuCoin get order error",
+          details: out,
+          orderId,
+        });
+      }
+
+      return json({
+        success: true,
+        order: out.data,
         raw: out,
       });
     }
 
     return json({ success: false, error: "Unknown action" });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
     console.error("Error in kucoin-trading:", err);
-    return json({ success: false, error: String(err?.message || err) });
+    return json({ success: false, error: errorMessage });
   }
 });
