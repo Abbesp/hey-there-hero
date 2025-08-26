@@ -168,6 +168,83 @@ serve(async (req) => {
       }
     }
 
+    if (action === "debug_order") {
+      const { symbol, side, size, type = "market", price } = body ?? {};
+      if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" });
+
+      try {
+        const endpoint = "/api/v1/orders";
+        const payload: Record<string, unknown> = {
+          clientOid: crypto.randomUUID(),
+          symbol,
+          side: String(side).toLowerCase(),
+          type,
+        };
+
+        if (type === "market") {
+          if (payload.side === "buy") {
+            payload.funds = String(size);
+          } else {
+            payload.size = String(size);
+          }
+        }
+
+        if (type === "limit") {
+          payload.price = String(price);
+          payload.size = String(size);
+          payload.timeInForce = "GTC";
+        }
+
+        const bodyStr = JSON.stringify(payload);
+        const headers = await kucoinHeaders("POST", endpoint, bodyStr);
+        
+        console.log("=== DEBUG ORDER PLACEMENT ===");
+        console.log("Symbol:", symbol);
+        console.log("Side:", side);
+        console.log("Size:", size);
+        console.log("Type:", type);
+        console.log("Price:", price);
+        console.log("Full payload:", payload);
+        console.log("Request body:", bodyStr);
+        console.log("API endpoint:", `${KUCOIN_BASE_URL}${endpoint}`);
+        console.log("Headers (safe):", { ...headers, "KC-API-SIGN": "[HIDDEN]" });
+        
+        const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
+        
+        console.log("Response status:", r.status);
+        console.log("Response headers:", Object.fromEntries(r.headers.entries()));
+        
+        const responseText = await r.text();
+        console.log("Raw response:", responseText);
+        
+        let parsedResponse;
+        try {
+          parsedResponse = JSON.parse(responseText);
+          console.log("Parsed response:", parsedResponse);
+        } catch (e) {
+          console.log("Failed to parse response as JSON:", e);
+          parsedResponse = null;
+        }
+        
+        return json({
+          success: true,
+          debug: {
+            request: { symbol, side, size, type, price, payload, bodyStr, endpoint },
+            response: { status: r.status, headers: Object.fromEntries(r.headers.entries()), text: responseText, parsed: parsedResponse }
+          }
+        });
+        
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error("Debug order error:", err);
+        return json({
+          success: false,
+          error: errorMessage,
+          details: err
+        });
+      }
+    }
+
     if (action === "place_order") {
       const { symbol, side, size, type = "market", price } = body ?? {};
       
@@ -247,24 +324,48 @@ serve(async (req) => {
       const headers = await kucoinHeaders("POST", endpoint, bodyStr);
       
       console.log(`Placing ${type} order:`, { symbol, side, size, price, payload });
+      console.log("Request payload:", bodyStr);
+      console.log("Request headers (safe):", { ...headers, "KC-API-SIGN": "[HIDDEN]" });
       
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
 
+      console.log("Response status:", r.status);
+      console.log("Response headers:", Object.fromEntries(r.headers.entries()));
+
       let out: KuCoinResponse<KuCoinOrderData>;
+      let responseText = "";
+      
       try {
-        out = await r.json();
+        responseText = await r.text();
+        console.log("Raw response text:", responseText);
+        
+        if (!responseText.trim()) {
+          console.error("Empty response from KuCoin");
+          return json({ 
+            success: false, 
+            error: "Empty response from KuCoin", 
+            status: r.status 
+          });
+        }
+        
+        out = JSON.parse(responseText);
       } catch (e) {
-        const responseText = await r.text();
         console.error("KuCoin order non-JSON response:", responseText);
         return json({ 
           success: false, 
           error: "KuCoin order non-JSON response", 
           responseText,
-          status: r.status 
+          status: r.status,
+          parseError: String(e)
         });
       }
 
-      console.log("KuCoin order response:", { status: r.status, out });
+      console.log("Parsed response:", out);
+      console.log("Response type:", typeof out);
+      console.log("Response has code:", !!out?.code);
+      console.log("Response code:", out?.code);
+      console.log("Response has data:", !!out?.data);
+      console.log("Response data:", out?.data);
 
       // Check for HTTP success first
       if (!r.ok) {
@@ -278,45 +379,54 @@ serve(async (req) => {
         });
       }
 
+      // Handle case where response might not have the expected structure
+      if (!out) {
+        console.error("KuCoin order response is null/undefined");
+        return json({
+          success: false,
+          error: "KuCoin order response is null/undefined",
+          responseText,
+          request: payload,
+        });
+      }
+
       // Check for KuCoin API success codes
       // KuCoin v1 API returns code "200000" for success, v2 might be different
-      if (!out || (out.code && out.code !== "200000")) {
+      if (out.code && out.code !== "200000") {
         console.error("KuCoin order API error:", { out, payload, headers });
         
         // Handle specific KuCoin error codes
         let errorMessage = "KuCoin order API error";
-        if (out?.code) {
-          switch (out.code) {
-            case "400001":
-              errorMessage = "Order failed - insufficient funds";
-              break;
-            case "400002":
-              errorMessage = "Order failed - invalid symbol";
-              break;
-            case "400003":
-              errorMessage = "Order failed - invalid order type";
-              break;
-            case "400004":
-              errorMessage = "Order failed - invalid price";
-              break;
-            case "400005":
-              errorMessage = "Order failed - invalid size";
-              break;
-            case "400006":
-              errorMessage = "Order failed - trading pair not available";
-              break;
-            case "400007":
-              errorMessage = "Order failed - account not found";
-              break;
-            case "400008":
-              errorMessage = "Order failed - order already exists";
-              break;
-            case "400009":
-              errorMessage = "Order failed - rate limit exceeded";
-              break;
-            default:
-              errorMessage = out?.msg || out?.message || `KuCoin API error: ${out.code}`;
-          }
+        switch (out.code) {
+          case "400001":
+            errorMessage = "Order failed - insufficient funds";
+            break;
+          case "400002":
+            errorMessage = "Order failed - invalid symbol";
+            break;
+          case "400003":
+            errorMessage = "Order failed - invalid order type";
+            break;
+          case "400004":
+            errorMessage = "Order failed - invalid price";
+            break;
+          case "400005":
+            errorMessage = "Order failed - invalid size";
+            break;
+          case "400006":
+            errorMessage = "Order failed - trading pair not available";
+            break;
+          case "400007":
+            errorMessage = "Order failed - account not found";
+            break;
+          case "400008":
+            errorMessage = "Order failed - order already exists";
+            break;
+          case "400009":
+            errorMessage = "Order failed - rate limit exceeded";
+            break;
+          default:
+            errorMessage = out?.msg || out?.message || `KuCoin API error: ${out.code}`;
         }
         
         return json({
@@ -324,6 +434,17 @@ serve(async (req) => {
           error: errorMessage,
           code: out?.code,
           details: out,
+          request: payload,
+        });
+      }
+
+      // Check if response has the expected success structure
+      if (!out.code || out.code !== "200000") {
+        console.error("KuCoin order response missing success code:", { out, payload });
+        return json({
+          success: false,
+          error: "KuCoin order response missing success code",
+          response: out,
           request: payload,
         });
       }
