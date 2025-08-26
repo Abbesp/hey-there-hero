@@ -109,6 +109,146 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
   return headers;
 }
 
+/* ============================================================
+   >>> Dina två funktioner inlagda (portade till Deno HMAC) <<<
+   - place_order(): använder env KUCOIN_API_VERSION (default "3")
+   - debug_order(): kör en fast testorder (BTC-USDT, buy, 5 USDT)
+   - Dessa kan användas fristående eller via actions nedan
+   ============================================================ */
+
+async function place_order(
+  symbol: string,
+  side: "buy" | "sell",
+  size: string,
+  type: "market" | "limit",
+) {
+  let stage = "init";
+  try {
+    stage = "env_setup";
+    const apiKey = Deno.env.get("KUCOIN_API_KEY")!;
+    const apiSecret = Deno.env.get("KUCOIN_API_SECRET")!;
+    const passphrase = Deno.env.get("KUCOIN_API_PASSPHRASE")!;
+    const apiVersion = Deno.env.get("KUCOIN_API_VERSION") || "3"; // default v3 (din kod)
+
+    if (!apiKey || !apiSecret || !passphrase) {
+      throw new Error("Missing API credentials");
+    }
+
+    stage = "build_payload";
+    const endpoint = "/api/v1/orders";
+    const url = KUCOIN_BASE_URL + endpoint;
+
+    const payload: Record<string, string> = {
+      clientOid: crypto.randomUUID(),
+      side,
+      symbol,
+      type,
+    };
+
+    if (type === "market") {
+      if (side === "buy") {
+        payload.funds = size; // USDT amount
+      } else {
+        payload.size = size; // coin amount
+      }
+    } else {
+      payload.price = "30000"; // demo price for limit
+      payload.size = size;
+    }
+
+    stage = "signing";
+    const timestamp = Date.now().toString();
+    const signature = await createSignature(timestamp, "POST", endpoint, JSON.stringify(payload), apiSecret);
+
+    const headers: Record<string, string> = {
+      "KC-API-KEY": apiKey,
+      "KC-API-SIGN": signature,
+      "KC-API-TIMESTAMP": timestamp,
+      "KC-API-KEY-VERSION": apiVersion,
+      "Content-Type": "application/json",
+    };
+
+    if (apiVersion === "2") {
+      headers["KC-API-PASSPHRASE"] = await createPassphrase(passphrase, apiSecret);
+    } else {
+      headers["KC-API-PASSPHRASE"] = passphrase; // plaintext for v3
+    }
+
+    stage = "sending_request";
+    const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+
+    const responseText = await r.text();
+    let out: any;
+    try {
+      out = JSON.parse(responseText);
+    } catch {
+      out = { raw: responseText };
+    }
+
+    if (out?.code === "200000") {
+      return { success: true, data: out.data };
+    } else {
+      return {
+        success: false,
+        stage: "KuCoin order API response",
+        error: "KuCoin returned non-success code",
+        code: out?.code,
+        msg: out?.msg,
+        request: {
+          endpoint,
+          payload,
+          headers: { ...headers, "KC-API-SIGN": "[HIDDEN]" }, // mask sign
+        },
+        response: {
+          status: r.status,
+          raw: responseText,
+          parsed: out,
+        },
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      stage,
+      error: err?.message || "Unexpected error",
+    };
+  }
+}
+
+// Din debug_order() som anropar place_order() ovan och returnerar Response via json()
+async function debug_order() {
+  try {
+    const symbol = "BTC-USDT"; // demo symbol
+    const side: "buy" = "buy";
+    const size = "5"; // köp för 5 USDT
+    const type: "market" = "market";
+
+    // kör riktiga place_order men i debug-läge
+    const result = await place_order(symbol, side, size, type);
+
+    return json({
+      success: result.success,
+      debug: true,
+      orderRequest: {
+        symbol,
+        side,
+        size,
+        type,
+      },
+      orderResult: result,
+    });
+  } catch (err: any) {
+    return json({
+      success: false,
+      debug: true,
+      stage: "debug_order",
+      error: err?.message || "Unexpected error in debug_order",
+    });
+  }
+}
+
+/* ================== SLUT på dina två funktioner ================== */
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -146,12 +286,12 @@ serve(async (req) => {
         // Test basic connectivity
         const r = await fetch(`${KUCOIN_BASE_URL}/api/v1/status`);
         const status: KuCoinResponse = await r.json();
-        
+
         // Test authenticated endpoint
         const headers = await kucoinHeaders("GET", "/api/v1/accounts", "");
         const accountsR = await fetch(`${KUCOIN_BASE_URL}/api/v1/accounts`, { headers });
         const accounts: KuCoinResponse = await accountsR.json();
-        
+
         return json({
           success: true,
           status: status,
@@ -169,6 +309,39 @@ serve(async (req) => {
       }
     }
 
+    // >>> Din exakta debug-order som fast endpoint
+    if (action === "debug_order_fixed") {
+      return await debug_order();
+    }
+
+    // >>> Din place_order som endpoint (tar params från body)
+    if (action === "place_order_user") {
+      try {
+        const symbol = String(body?.symbol ?? "");
+        const side = String(body?.side ?? "").toLowerCase() as "buy" | "sell";
+        const size = String(body?.size ?? "");
+        const type = String(body?.type ?? "market").toLowerCase() as "market" | "limit";
+
+        if (!symbol || !side || !size) {
+          return json({
+            success: false,
+            error: "Missing order params",
+            required: ["symbol", "side", "size"],
+            received: { symbol, side, size, type }
+          });
+        }
+
+        const res = await place_order(symbol, side, size, type);
+        return json({ success: res.success, result: res, request: { symbol, side, size, type } });
+      } catch (err: any) {
+        return json({
+          success: false,
+          error: err?.message || "Unexpected error in place_order_user"
+        });
+      }
+    }
+
+    // Befintlig debug_order (behållen)
     if (action === "debug_order") {
       const { symbol, side, size, type = "market", price } = body ?? {};
       if (!symbol || !side || !size) return json({ success: false, error: "Missing order params" });
@@ -198,7 +371,7 @@ serve(async (req) => {
 
         const bodyStr = JSON.stringify(payload);
         const headers = await kucoinHeaders("POST", endpoint, bodyStr);
-        
+
         console.log("=== DEBUG ORDER PLACEMENT ===");
         console.log("Symbol:", symbol);
         console.log("Side:", side);
@@ -209,15 +382,15 @@ serve(async (req) => {
         console.log("Request body:", bodyStr);
         console.log("API endpoint:", `${KUCOIN_BASE_URL}${endpoint}`);
         console.log("Headers (safe):", { ...headers, "KC-API-SIGN": "[HIDDEN]" });
-        
+
         const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
-        
+
         console.log("Response status:", r.status);
         console.log("Response headers:", Object.fromEntries(r.headers.entries()));
-        
+
         const responseText = await r.text();
         console.log("Raw response:", responseText);
-        
+
         let parsedResponse;
         try {
           parsedResponse = JSON.parse(responseText);
@@ -226,7 +399,7 @@ serve(async (req) => {
           console.log("Failed to parse response as JSON:", e);
           parsedResponse = null;
         }
-        
+
         return json({
           success: true,
           debug: {
@@ -234,7 +407,7 @@ serve(async (req) => {
             response: { status: r.status, headers: Object.fromEntries(r.headers.entries()), text: responseText, parsed: parsedResponse }
           }
         });
-        
+
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error("Debug order error:", err);
@@ -260,24 +433,24 @@ serve(async (req) => {
 
         const bodyStr = JSON.stringify(payload);
         const headers = await kucoinHeaders("POST", endpoint, bodyStr);
-        
+
         console.log("=== TESTING BTC-USDT ORDER ===");
         console.log("Payload:", payload);
         console.log("Request body:", bodyStr);
-        
+
         const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
-        
+
         console.log("Response status:", r.status);
         console.log("Response headers:", Object.fromEntries(r.headers.entries()));
-        
+
         const responseText = await r.text();
         console.log("Raw response:", responseText);
-        
+
         let parsedResponse;
         try {
           parsedResponse = JSON.parse(responseText);
           console.log("Parsed response:", parsedResponse);
-          
+
           // Analyze the response structure
           const analysis = {
             hasCode: !!parsedResponse?.code,
@@ -290,9 +463,9 @@ serve(async (req) => {
             isSuccess: parsedResponse?.code === "200000",
             errorMessage: parsedResponse?.msg || parsedResponse?.message || "No error message found"
           };
-          
+
           console.log("Response analysis:", analysis);
-          
+
           return json({
             success: true,
             test: {
@@ -301,7 +474,7 @@ serve(async (req) => {
               analysis: analysis
             }
           });
-          
+
         } catch (e) {
           console.log("Failed to parse response as JSON:", e);
           return json({
@@ -312,7 +485,7 @@ serve(async (req) => {
             }
           });
         }
-        
+
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error("Test BTC order error:", err);
@@ -338,24 +511,24 @@ serve(async (req) => {
 
         const bodyStr = JSON.stringify(payload);
         const headers = await kucoinHeaders("POST", endpoint, bodyStr);
-        
+
         console.log("=== TESTING ETH-USDT ORDER ===");
         console.log("Payload:", payload);
         console.log("Request body:", bodyStr);
-        
+
         const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
-        
+
         console.log("Response status:", r.status);
         console.log("Response headers:", Object.fromEntries(r.headers.entries()));
-        
+
         const responseText = await r.text();
         console.log("Raw response:", responseText);
-        
+
         let parsedResponse;
         try {
           parsedResponse = JSON.parse(responseText);
           console.log("Parsed response:", parsedResponse);
-          
+
           // Analyze the response structure
           const analysis = {
             hasCode: !!parsedResponse?.code,
@@ -368,9 +541,9 @@ serve(async (req) => {
             isSuccess: parsedResponse?.code === "200000",
             errorMessage: parsedResponse?.msg || parsedResponse?.message || "No error message found"
           };
-          
+
           console.log("Response analysis:", analysis);
-          
+
           return json({
             success: true,
             test: {
@@ -379,7 +552,7 @@ serve(async (req) => {
               analysis: analysis
             }
           });
-          
+
         } catch (e) {
           console.log("Failed to parse response as JSON:", e);
           return json({
@@ -390,7 +563,7 @@ serve(async (req) => {
             }
           });
         }
-        
+
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error("Test ETH order error:", err);
@@ -404,12 +577,12 @@ serve(async (req) => {
 
     if (action === "place_order") {
       const { symbol, side, size, type = "market", price } = body ?? {};
-      
+
       // Enhanced validation
       if (!symbol || !side || !size) {
-        return json({ 
-          success: false, 
-          error: "Missing order params", 
+        return json({
+          success: false,
+          error: "Missing order params",
           required: ["symbol", "side", "size"],
           received: { symbol, side, size, type, price }
         });
@@ -417,41 +590,41 @@ serve(async (req) => {
 
       // Validate symbol format
       if (typeof symbol !== "string" || !symbol.includes("-")) {
-        return json({ 
-          success: false, 
-          error: "Invalid symbol format. Expected format: BASE-QUOTE (e.g., BTC-USDT)" 
+        return json({
+          success: false,
+          error: "Invalid symbol format. Expected format: BASE-QUOTE (e.g., BTC-USDT)"
         });
       }
 
       // Validate side
       if (!["buy", "sell"].includes(String(side).toLowerCase())) {
-        return json({ 
-          success: false, 
-          error: "Invalid side. Must be 'buy' or 'sell'" 
+        return json({
+          success: false,
+          error: "Invalid side. Must be 'buy' or 'sell'"
         });
       }
 
       // Validate size
       if (isNaN(Number(size)) || Number(size) <= 0) {
-        return json({ 
-          success: false, 
-          error: "Invalid size. Must be a positive number" 
+        return json({
+          success: false,
+          error: "Invalid size. Must be a positive number"
         });
       }
 
       // Validate type
       if (!["market", "limit"].includes(type)) {
-        return json({ 
-          success: false, 
-          error: "Invalid order type. Must be 'market' or 'limit'" 
+        return json({
+          success: false,
+          error: "Invalid order type. Must be 'market' or 'limit'"
         });
       }
 
       // Validate price for limit orders
       if (type === "limit" && (!price || isNaN(Number(price)) || Number(price) <= 0)) {
-        return json({ 
-          success: false, 
-          error: "Invalid price for limit order. Must be a positive number" 
+        return json({
+          success: false,
+          error: "Invalid price for limit order. Must be a positive number"
         });
       }
 
@@ -479,11 +652,11 @@ serve(async (req) => {
 
       const bodyStr = JSON.stringify(payload);
       const headers = await kucoinHeaders("POST", endpoint, bodyStr);
-      
+
       console.log(`Placing ${type} order:`, { symbol, side, size, price, payload });
       console.log("Request payload:", bodyStr);
       console.log("Request headers (safe):", { ...headers, "KC-API-SIGN": "[HIDDEN]" });
-      
+
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
 
       console.log("Response status:", r.status);
@@ -491,26 +664,26 @@ serve(async (req) => {
 
       let out: KuCoinResponse<KuCoinOrderData>;
       let responseText = "";
-      
+
       try {
         responseText = await r.text();
         console.log("Raw response text:", responseText);
-        
+
         if (!responseText.trim()) {
           console.error("Empty response from KuCoin");
-          return json({ 
-            success: false, 
-            error: "Empty response from KuCoin", 
-            status: r.status 
+          return json({
+            success: false,
+            error: "Empty response from KuCoin",
+            status: r.status
           });
         }
-        
+
         out = JSON.parse(responseText);
       } catch (e) {
         console.error("KuCoin order non-JSON response:", responseText);
-        return json({ 
-          success: false, 
-          error: "KuCoin order non-JSON response", 
+        return json({
+          success: false,
+          error: "KuCoin order non-JSON response",
           responseText,
           status: r.status,
           parseError: String(e)
@@ -553,14 +726,14 @@ serve(async (req) => {
       // Check if response has the expected structure
       if (!out.code) {
         console.error("KuCoin order response missing code field:", { out, payload });
-        
+
         // Try to extract any error information from the response
         let errorMessage = "KuCoin order response missing code field - unexpected response format";
         if (out.msg) errorMessage = out.msg;
         else if (out.message) errorMessage = out.message;
         else if (out.error) errorMessage = out.error;
-        else if (out.data && out.data.error) errorMessage = out.data.error;
-        
+        else if ((out as any).data && (out as any).data.error) errorMessage = (out as any).data.error;
+
         return json({
           success: false,
           error: errorMessage,
@@ -572,9 +745,9 @@ serve(async (req) => {
             hasData: !!out?.data,
             hasMsg: !!out?.msg,
             hasMessage: !!out?.message,
-            hasError: !!out?.error,
+            hasError: !!(out as any)?.error,
             responseKeys: Object.keys(out || {}),
-            dataKeys: out?.data ? Object.keys(out.data) : []
+            dataKeys: (out as any)?.data ? Object.keys((out as any).data) : []
           }
         });
       }
@@ -603,15 +776,15 @@ serve(async (req) => {
 
       // If we get here, it's an error response
       console.error("KuCoin order API error:", { out, payload, headers });
-      
+
       // Extract error message with fallbacks
       let errorMessage = "KuCoin order failed";
       if (out.msg) errorMessage = out.msg;
       else if (out.message) errorMessage = out.message;
       else if (out.error) errorMessage = out.error;
-      else if (out.data && out.data.error) errorMessage = out.data.error;
+      else if ((out as any).data && (out as any).data.error) errorMessage = (out as any).data.error;
       else if (out.code) errorMessage = `KuCoin error: ${out.code}`;
-      
+
       return json({
         success: false,
         error: errorMessage,
@@ -627,10 +800,10 @@ serve(async (req) => {
 
       const endpoint = `/api/v1/orders/${orderId}`;
       const headers = await kucoinHeaders("GET", endpoint, "");
-      
+
       const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { headers });
       const out: KuCoinResponse<KuCoinOrderData> = await r.json();
-      
+
       if (!r.ok || !out || out.code !== "200000") {
         console.error("KuCoin get order error:", { status: r.status, out, orderId });
         return json({
