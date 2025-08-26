@@ -323,6 +323,84 @@ serve(async (req) => {
       }
     }
 
+    if (action === "test_eth_order") {
+      try {
+        // Test the exact ETH-USDT order that's failing in your bot
+        const endpoint = "/api/v1/orders";
+        const payload = {
+          clientOid: crypto.randomUUID(),
+          symbol: "ETH-USDT",
+          side: "sell", // Based on your bot showing SELL for ETH-USDT
+          type: "market",
+          size: "0.01" // Small amount for testing
+        };
+
+        const bodyStr = JSON.stringify(payload);
+        const headers = await kucoinHeaders("POST", endpoint, bodyStr);
+        
+        console.log("=== TESTING ETH-USDT ORDER ===");
+        console.log("Payload:", payload);
+        console.log("Request body:", bodyStr);
+        
+        const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
+        
+        console.log("Response status:", r.status);
+        console.log("Response headers:", Object.fromEntries(r.headers.entries()));
+        
+        const responseText = await r.text();
+        console.log("Raw response:", responseText);
+        
+        let parsedResponse;
+        try {
+          parsedResponse = JSON.parse(responseText);
+          console.log("Parsed response:", parsedResponse);
+          
+          // Analyze the response structure
+          const analysis = {
+            hasCode: !!parsedResponse?.code,
+            code: parsedResponse?.code,
+            hasData: !!parsedResponse?.data,
+            hasMsg: !!parsedResponse?.msg,
+            hasMessage: !!parsedResponse?.message,
+            responseKeys: Object.keys(parsedResponse || {}),
+            dataKeys: parsedResponse?.data ? Object.keys(parsedResponse.data) : [],
+            isSuccess: parsedResponse?.code === "200000",
+            errorMessage: parsedResponse?.msg || parsedResponse?.message || "No error message found"
+          };
+          
+          console.log("Response analysis:", analysis);
+          
+          return json({
+            success: true,
+            test: {
+              request: payload,
+              response: { status: r.status, text: responseText, parsed: parsedResponse },
+              analysis: analysis
+            }
+          });
+          
+        } catch (e) {
+          console.log("Failed to parse response as JSON:", e);
+          return json({
+            success: true,
+            test: {
+              request: payload,
+              response: { status: r.status, text: responseText, parseError: String(e) }
+            }
+          });
+        }
+        
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error("Test ETH order error:", err);
+        return json({
+          success: false,
+          error: errorMessage,
+          details: err
+        });
+      }
+    }
+
     if (action === "place_order") {
       const { symbol, side, size, type = "market", price } = body ?? {};
       
@@ -463,6 +541,18 @@ serve(async (req) => {
         return json({
           success: false,
           error: "KuCoin order response is null/undefined",
+          responseText,
+          request: payload,
+        });
+      }
+
+      // Check if response has the expected structure
+      if (!out.code) {
+        console.error("KuCoin order response missing code field:", { out, payload });
+        return json({
+          success: false,
+          error: "KuCoin order response missing code field - unexpected response format",
+          response: out,
           responseText,
           request: payload,
         });
