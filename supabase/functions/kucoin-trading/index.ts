@@ -10,7 +10,7 @@ const corsHeaders = {
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), {
-    status: 200, // alltid 200
+    status: 200,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
@@ -45,7 +45,7 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
   const apiKey = Deno.env.get("KUCOIN_API_KEY");
   const apiSecret = Deno.env.get("KUCOIN_API_SECRET");
   const passphrase = Deno.env.get("KUCOIN_API_PASSPHRASE");
-  const apiVersion = Deno.env.get("KUCOIN_API_VERSION") || "2"; // default 2
+  const apiVersion = Deno.env.get("KUCOIN_API_VERSION") || "2"; // default v2
 
   if (!apiKey || !apiSecret || !passphrase) {
     throw new Error("Missing KuCoin API credentials");
@@ -61,12 +61,14 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
   };
 
   if (apiVersion === "2") {
+    // Encrypted passphrase
     headers["KC-API-PASSPHRASE"] = await createPassphrase(passphrase, apiSecret);
   } else {
-    headers["KC-API-PASSPHRASE"] = passphrase; // v1: raw passphrase
+    // Raw passphrase
+    headers["KC-API-PASSPHRASE"] = passphrase;
   }
 
-  // log safe headers
+  // Log safe headers
   const safeHeaders = { ...headers };
   delete safeHeaders["KC-API-SIGN"];
   console.log("KuCoin headers (safe):", safeHeaders);
@@ -144,9 +146,8 @@ serve(async (req) => {
         return json({ success: false, error: "KuCoin order non-JSON response" });
       }
 
-      // kontrollera både HTTP och KuCoin-code
       if (!r.ok || !out || out.code !== "200000") {
-        console.error("KuCoin order error:", { status: r.status, out, payload });
+        console.error("KuCoin order error:", { status: r.status, out, payload, headers });
         return json({
           success: false,
           error: out?.msg || "KuCoin order error",
