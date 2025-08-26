@@ -17,6 +17,7 @@ interface KuCoinResponse<T = any> {
   data: T;
   msg?: string;
   message?: string;
+  error?: string;
 }
 
 interface KuCoinOrderData {
@@ -546,15 +547,35 @@ serve(async (req) => {
         });
       }
 
+      // Log the complete response for debugging
+      console.log("Complete KuCoin response:", JSON.stringify(out, null, 2));
+
       // Check if response has the expected structure
       if (!out.code) {
         console.error("KuCoin order response missing code field:", { out, payload });
+        
+        // Try to extract any error information from the response
+        let errorMessage = "KuCoin order response missing code field - unexpected response format";
+        if (out.msg) errorMessage = out.msg;
+        else if (out.message) errorMessage = out.message;
+        else if (out.error) errorMessage = out.error;
+        else if (out.data && out.data.error) errorMessage = out.data.error;
+        
         return json({
           success: false,
-          error: "KuCoin order response missing code field - unexpected response format",
+          error: errorMessage,
           response: out,
           responseText,
           request: payload,
+          responseStructure: {
+            hasCode: !!out?.code,
+            hasData: !!out?.data,
+            hasMsg: !!out?.msg,
+            hasMessage: !!out?.message,
+            hasError: !!out?.error,
+            responseKeys: Object.keys(out || {}),
+            dataKeys: out?.data ? Object.keys(out.data) : []
+          }
         });
       }
 
@@ -583,10 +604,12 @@ serve(async (req) => {
       // If we get here, it's an error response
       console.error("KuCoin order API error:", { out, payload, headers });
       
-      // Extract error message
+      // Extract error message with fallbacks
       let errorMessage = "KuCoin order failed";
       if (out.msg) errorMessage = out.msg;
       else if (out.message) errorMessage = out.message;
+      else if (out.error) errorMessage = out.error;
+      else if (out.data && out.data.error) errorMessage = out.data.error;
       else if (out.code) errorMessage = `KuCoin error: ${out.code}`;
       
       return json({
