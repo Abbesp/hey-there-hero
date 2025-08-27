@@ -188,10 +188,17 @@ async function place_order(
     if (out?.code === "200000") {
       return { success: true, data: out.data };
     } else {
+      // Extract the actual error message from KuCoin response
+      let errorMessage = "KuCoin order failed";
+      if (out?.msg) errorMessage = out.msg;
+      else if (out?.message) errorMessage = out.message;
+      else if (out?.error) errorMessage = out.error;
+      else if (out?.code) errorMessage = `KuCoin error: ${out.code}`;
+      
       return {
         success: false,
         stage: "KuCoin order API response",
-        error: "KuCoin returned non-success code",
+        error: errorMessage,
         code: out?.code,
         msg: out?.msg,
         request: {
