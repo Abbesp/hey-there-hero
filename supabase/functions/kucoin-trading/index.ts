@@ -78,7 +78,7 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
   const apiKey = Deno.env.get("KUCOIN_API_KEY");
   const apiSecret = Deno.env.get("KUCOIN_API_SECRET");
   const passphrase = Deno.env.get("KUCOIN_API_PASSPHRASE");
-  const apiVersion = Deno.env.get("KUCOIN_API_VERSION") || "2"; // default v2
+  const apiVersion = Deno.env.get("KUCOIN_API_VERSION") || "3"; // default v3
 
   if (!apiKey || !apiSecret || !passphrase) {
     throw new Error("Missing KuCoin API credentials");
@@ -94,10 +94,10 @@ async function kucoinHeaders(method: string, endpoint: string, body: string) {
   };
 
   if (apiVersion === "2") {
-    // Encrypted passphrase
+    // Encrypted passphrase for v2
     headers["KC-API-PASSPHRASE"] = await createPassphrase(passphrase, apiSecret);
   } else {
-    // Raw passphrase
+    // Raw passphrase for v3 (and v1)
     headers["KC-API-PASSPHRASE"] = passphrase;
   }
 
@@ -296,7 +296,7 @@ serve(async (req) => {
           success: true,
           status: status,
           accounts: accounts,
-          apiVersion: Deno.env.get("KUCOIN_API_VERSION") || "2"
+          apiVersion: Deno.env.get("KUCOIN_API_VERSION") || "3"
         });
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
@@ -628,170 +628,31 @@ serve(async (req) => {
         });
       }
 
-      const endpoint = "/api/v1/orders";
-      const payload: Record<string, unknown> = {
-        clientOid: crypto.randomUUID(),
-        symbol,
-        side: String(side).toLowerCase(),
-        type,
-      };
-
-      if (type === "market") {
-        if (payload.side === "buy") {
-          payload.funds = String(size); // USDT-belopp att spendera
-        } else {
-          payload.size = String(size); // antal coins att sälja
-        }
-      }
-
-      if (type === "limit") {
-        payload.price = String(price);
-        payload.size = String(size);
-        payload.timeInForce = "GTC";
-      }
-
-      const bodyStr = JSON.stringify(payload);
-      const headers = await kucoinHeaders("POST", endpoint, bodyStr);
-
-      console.log(`Placing ${type} order:`, { symbol, side, size, price, payload });
-      console.log("Request payload:", bodyStr);
-      console.log("Request headers (safe):", { ...headers, "KC-API-SIGN": "[HIDDEN]" });
-
-      const r = await fetch(`${KUCOIN_BASE_URL}${endpoint}`, { method: "POST", headers, body: bodyStr });
-
-      console.log("Response status:", r.status);
-      console.log("Response headers:", Object.fromEntries(r.headers.entries()));
-
-      let out: KuCoinResponse<KuCoinOrderData>;
-      let responseText = "";
-
       try {
-        responseText = await r.text();
-        console.log("Raw response text:", responseText);
-
-        if (!responseText.trim()) {
-          console.error("Empty response from KuCoin");
+        // Use the working place_order function
+        const result = await place_order(symbol, side as "buy" | "sell", size, type as "market" | "limit");
+        
+        if (result.success) {
+          return json({
+            success: true,
+            orderId: result.data?.orderId || "unknown",
+            raw: result.data,
+          });
+        } else {
           return json({
             success: false,
-            error: "Empty response from KuCoin",
-            status: r.status
+            error: result.error || "Order failed",
+            stage: result.stage,
+            details: result,
           });
         }
-
-        out = JSON.parse(responseText);
-      } catch (e) {
-        console.error("KuCoin order non-JSON response:", responseText);
+      } catch (err: any) {
         return json({
           success: false,
-          error: "KuCoin order non-JSON response",
-          responseText,
-          status: r.status,
-          parseError: String(e)
+          error: err?.message || "Unexpected error placing order",
+          details: err
         });
       }
-
-      console.log("Parsed response:", out);
-      console.log("Response type:", typeof out);
-      console.log("Response has code:", !!out?.code);
-      console.log("Response code:", out?.code);
-      console.log("Response has data:", !!out?.data);
-      console.log("Response data:", out?.data);
-
-      // Check for HTTP success first
-      if (!r.ok) {
-        console.error("KuCoin order HTTP error:", { status: r.status, out, payload });
-        return json({
-          success: false,
-          error: `KuCoin HTTP error: ${r.status}`,
-          details: out,
-          request: payload,
-          status: r.status,
-        });
-      }
-
-      // Handle case where response might not have the expected structure
-      if (!out) {
-        console.error("KuCoin order response is null/undefined");
-        return json({
-          success: false,
-          error: "KuCoin order response is null/undefined",
-          responseText,
-          request: payload,
-        });
-      }
-
-      // Log the complete response for debugging
-      console.log("Complete KuCoin response:", JSON.stringify(out, null, 2));
-
-      // Check if response has the expected structure
-      if (!out.code) {
-        console.error("KuCoin order response missing code field:", { out, payload });
-
-        // Try to extract any error information from the response
-        let errorMessage = "KuCoin order response missing code field - unexpected response format";
-        if (out.msg) errorMessage = out.msg;
-        else if (out.message) errorMessage = out.message;
-        else if (out.error) errorMessage = out.error;
-        else if ((out as any).data && (out as any).data.error) errorMessage = (out as any).data.error;
-
-        return json({
-          success: false,
-          error: errorMessage,
-          response: out,
-          responseText,
-          request: payload,
-          responseStructure: {
-            hasCode: !!out?.code,
-            hasData: !!out?.data,
-            hasMsg: !!out?.msg,
-            hasMessage: !!out?.message,
-            hasError: !!(out as any)?.error,
-            responseKeys: Object.keys(out || {}),
-            dataKeys: (out as any)?.data ? Object.keys((out as any).data) : []
-          }
-        });
-      }
-
-      // Check if this is a successful response from KuCoin
-      // KuCoin returns code "200000" for success
-      if (out.code === "200000") {
-        // Success! Check if we have order data
-        if (!out.data || !out.data.orderId) {
-          console.error("KuCoin order missing data:", { out, payload });
-          return json({
-            success: false,
-            error: "KuCoin order response missing order data",
-            details: out,
-            request: payload,
-          });
-        }
-
-        console.log("Order placed successfully:", { orderId: out.data.orderId, symbol, side, size });
-        return json({
-          success: true,
-          orderId: out.data.orderId,
-          raw: out,
-        });
-      }
-
-      // If we get here, it's an error response
-      console.error("KuCoin order API error:", { out, payload, headers });
-
-      // Extract error message with fallbacks
-      let errorMessage = "KuCoin order failed";
-      if (out.msg) errorMessage = out.msg;
-      else if (out.message) errorMessage = out.message;
-      else if (out.error) errorMessage = out.error;
-      else if ((out as any).data && (out as any).data.error) errorMessage = (out as any).data.error;
-      else if (out.code) errorMessage = `KuCoin error: ${out.code}`;
-
-      return json({
-        success: false,
-        error: errorMessage,
-        code: out.code,
-        details: out,
-        request: payload,
-      });
     }
 
     if (action === "get_order_status") {
